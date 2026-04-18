@@ -30,7 +30,14 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Reminder, ScheduleItem, ChatMessage, AppPreference } from './types';
-import { chatWithAura, getAuraVoice } from './services/auraService';
+import { 
+  chatWithAura, 
+  getAuraVoice, 
+  AIProvider, 
+  APIKeys, 
+  getStoredKeys, 
+  saveStoredKeys 
+} from './services/auraService';
 
 export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -55,6 +62,10 @@ export default function App() {
   });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [notificationStatus, setNotificationStatus] = useState<NotificationPermission | 'unsupported'>('default');
+  
+  // AI Provider State
+  const [activeProvider, setActiveProvider] = useState<AIProvider>('gemini');
+  const [apiKeys, setApiKeys] = useState<APIKeys>(getStoredKeys());
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -156,6 +167,10 @@ export default function App() {
       localStorage.removeItem('aura_reminders');
       localStorage.removeItem('aura_schedule');
     }
+    
+    // Load Provider
+    const savedProvider = localStorage.getItem('aura_active_provider');
+    if (savedProvider) setActiveProvider(savedProvider as AIProvider);
 
     // Initial message
     setMessages([{
@@ -302,6 +317,16 @@ export default function App() {
     }
   }, []);
 
+  // Save Keys
+  useEffect(() => {
+    saveStoredKeys(apiKeys);
+  }, [apiKeys]);
+
+  // Save Provider
+  useEffect(() => {
+    localStorage.setItem('aura_active_provider', activeProvider);
+  }, [activeProvider]);
+
   const handleSend = async (overrideInput?: string) => {
     const finalInput = overrideInput || input;
     if (!finalInput.trim() && !isScreenActive) return;
@@ -334,7 +359,7 @@ export default function App() {
       ]
     });
 
-    const auraResponse = await chatWithAura(history, handleFunctionCall);
+    const auraResponse = await chatWithAura(history, handleFunctionCall, activeProvider);
 
     setMessages(prev => [...prev, {
       id: (Date.now() + 1).toString(),
@@ -422,6 +447,72 @@ export default function App() {
                 </div>
 
                 <div className="p-8 space-y-8 overflow-y-auto max-h-[70vh] scrollbar-hide">
+                  {/* Level Selection */}
+                  <section>
+                    <h3 className="text-[11px] uppercase tracking-[0.2em] text-accent font-bold mb-4">Neural Cortices (AI Models)</h3>
+                    <div className="space-y-6">
+                      <div className="grid grid-cols-3 gap-3">
+                        {(['gemini', 'openai', 'claude'] as const).map((p) => (
+                          <button
+                            key={p}
+                            onClick={() => setActiveProvider(p)}
+                            className={`p-4 rounded-2xl border text-left transition-all ${
+                              activeProvider === p 
+                              ? 'bg-accent/10 border-accent text-accent shadow-[0_0_20px_rgba(0,242,255,0.1)]' 
+                              : 'bg-white/[0.03] border-white/5 text-[#8e8e93] hover:border-white/20'
+                            }`}
+                          >
+                            <div className="text-xs font-bold uppercase tracking-widest mb-1">{p === 'openai' ? 'ChatGPT' : p === 'claude' ? 'Claude' : 'Gemini'}</div>
+                            <div className="text-[10px] leading-tight flex items-center gap-1 opacity-60">
+                              {p === 'gemini' && "Recommended"}
+                              {p === 'openai' && "GPT-4o Intelligence"}
+                              {p === 'claude' && "Sonnet 3.5 Logic"}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="space-y-4 bg-white/[0.02] border border-white/5 p-6 rounded-[24px]">
+                        <h4 className="text-[10px] uppercase tracking-[0.15em] text-[#8e8e93] mb-4">Manual Key Entry</h4>
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-[10px] text-[#8e8e93] uppercase tracking-widest mb-2 ml-1">Gemini API Key</label>
+                            <input 
+                              type="password"
+                              value={apiKeys.gemini || ''}
+                              onChange={(e) => setApiKeys(prev => ({ ...prev, gemini: e.target.value }))}
+                              placeholder="Enter Gemini Key..."
+                              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:border-accent outline-none transition-all placeholder:text-white/10"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-[#8e8e93] uppercase tracking-widest mb-2 ml-1">OpenAI API Key</label>
+                            <input 
+                              type="password"
+                              value={apiKeys.openai || ''}
+                              onChange={(e) => setApiKeys(prev => ({ ...prev, openai: e.target.value }))}
+                              placeholder="sk-..."
+                              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:border-accent outline-none transition-all placeholder:text-white/10"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[10px] text-[#8e8e93] uppercase tracking-widest mb-2 ml-1">Anthropic API Key</label>
+                            <input 
+                              type="password"
+                              value={apiKeys.claude || ''}
+                              onChange={(e) => setApiKeys(prev => ({ ...prev, claude: e.target.value }))}
+                              placeholder="sk-ant-..."
+                              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:border-accent outline-none transition-all placeholder:text-white/10"
+                            />
+                          </div>
+                        </div>
+                        <p className="text-[9px] text-[#8e8e93] mt-4 leading-relaxed italic">
+                          *Keys are stored locally in your neural buffer (localStorage) and never transmitted to our servers.
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+
                   {/* Level Selection */}
                   <section>
                     <h3 className="text-[11px] uppercase tracking-[0.2em] text-accent font-bold mb-4">Core Automation Level</h3>

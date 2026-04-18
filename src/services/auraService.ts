@@ -4,22 +4,56 @@
  */
 
 import { GoogleGenAI, Type, FunctionDeclaration, Modality } from "@google/genai";
+import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import { Reminder, ScheduleItem } from "../types";
 
-let aiInstance: GoogleGenAI | null = null;
+export type AIProvider = 'gemini' | 'openai' | 'claude';
 
-function getAi() {
-  if (aiInstance) return aiInstance;
-  
-  const apiKey = (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || 
-                 (import.meta as any).env?.VITE_GEMINI_API_KEY;
-                 
-  if (!apiKey || apiKey === 'undefined') {
-    return null;
+export interface APIKeys {
+  gemini?: string;
+  openai?: string;
+  claude?: string;
+}
+
+const STORAGE_KEY = 'aura_api_keys';
+
+export function getStoredKeys(): APIKeys {
+  try {
+    const keys = localStorage.getItem(STORAGE_KEY);
+    return keys ? JSON.parse(keys) : {};
+  } catch {
+    return {};
   }
-  
-  aiInstance = new GoogleGenAI(apiKey);
-  return aiInstance;
+}
+
+export function saveStoredKeys(keys: APIKeys) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(keys));
+}
+
+let geminiInstance: GoogleGenAI | null = null;
+let openaiInstance: OpenAI | null = null;
+let claudeInstance: Anthropic | null = null;
+
+function getGemini(key?: string) {
+  const finalKey = key || getStoredKeys().gemini || (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  if (!finalKey || finalKey === 'undefined') return null;
+  if (!geminiInstance) geminiInstance = new GoogleGenAI(finalKey);
+  return geminiInstance;
+}
+
+function getOpenAI(key?: string) {
+  const finalKey = key || getStoredKeys().openai;
+  if (!finalKey) return null;
+  if (!openaiInstance) openaiInstance = new OpenAI({ apiKey: finalKey, dangerouslyAllowBrowser: true });
+  return openaiInstance;
+}
+
+function getClaude(key?: string) {
+  const finalKey = key || getStoredKeys().claude;
+  if (!finalKey) return null;
+  if (!claudeInstance) claudeInstance = new Anthropic({ apiKey: finalKey, dangerouslyAllowBrowser: true });
+  return claudeInstance;
 }
 
 export const addReminderTool: FunctionDeclaration = {
@@ -76,8 +110,8 @@ export const addScheduleItemTool: FunctionDeclaration = {
 
 export async function getAuraVoice(text: string) {
   try {
-    const ai = getAi();
-    if (!ai) throw new Error("Aura AI Assistant: GEMINI_API_KEY is not configured.");
+    const ai = getGemini();
+    if (!ai) throw new Error("Aura AI Assistant: Gemini API key is not configured for Voice.");
 
     const response = await ai.models.generateContent({
       model: "gemini-3.1-flash-tts-preview",
@@ -111,34 +145,150 @@ You are fluent in Hindi. If the user speaks to you in Hindi or requests Hindi, r
 
 export async function chatWithAura(
   messages: { role: string; parts: any[] }[],
-  onFunctionCall: (name: string, args: any) => void
+  onFunctionCall: (name: string, args: any) => void,
+  provider: AIProvider = 'gemini'
 ) {
   try {
-    const ai = getAi();
-    if (!ai) return "Aura configuration incomplete. Please set the GEMINI_API_KEY environment variable.";
+    if (provider === 'gemini') {
+      const ai = getGemini();
+      if (!ai) return "Gemini configuration incomplete. Please set your key in Settings.";
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: messages.map(msg => ({
-        role: msg.role === 'user' ? 'user' : 'model',
-        parts: msg.parts
-      })),
-      config: {
-        systemInstruction,
-        tools: [{ functionDeclarations: [addReminderTool, addScheduleItemTool] }],
-      },
-    });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: messages.map(msg => ({
+          role: msg.role === 'user' ? 'user' : 'model',
+          parts: msg.parts
+        })),
+        config: {
+          systemInstruction,
+          tools: [{ functionDeclarations: [addReminderTool, addScheduleItemTool] }],
+        },
+      });
 
-    if (response.functionCalls) {
-      for (const call of response.functionCalls) {
-        onFunctionCall(call.name, call.args);
+      if (response.functionCalls) {
+        for (const call of response.functionCalls) {
+          onFunctionCall(call.name, call.args);
+        }
+        return "I've updated your information for you.";
       }
-      return "I've updated your information for you.";
+      return response.text || "I'm sorry, I couldn't process that.";
     }
 
-    return response.text || "I'm sorry, I couldn't process that.";
+    if (provider === 'openai') {
+      const ai = getOpenAI();
+      if (!ai) return "ChatGPT (OpenAI) key is missing. Please add it to Settings.";
+
+      const response = await ai.chat.completions.create({
+        model: "gpt-4o",
+        messages: messages.map(msg => ({
+          role: msg.role as any,
+          content: msg.parts[0].text
+        })),
+        tools: [
+          {
+            type: "function",
+            function: {
+              name: "add_reminder",
+              description: "Adds a new reminder",
+              parameters: {
+                type: "object",
+                properties: {
+                  text: { type: "string" },
+                  time: { type: "string" },
+                  priority: { type: "string", enum: ["low", "medium", "high"] }
+                },
+                required: ["text", "time"]
+              }
+            }
+          },
+          {
+            type: "function",
+            function: {
+              name: "add_schedule_item",
+              description: "Adds a schedule event",
+              parameters: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  startTime: { type: "string" },
+                  endTime: { type: "string" },
+                  category: { type: "string", enum: ["work", "personal", "health", "other"] }
+                },
+                required: ["title", "startTime", "endTime"]
+              }
+            }
+          }
+        ]
+      });
+
+      const message = response.choices[0].message;
+      if (message.tool_calls) {
+        for (const call of message.tool_calls) {
+          if (call.type === 'function') {
+            onFunctionCall(call.function.name, JSON.parse(call.function.arguments));
+          }
+        }
+        return "I've updated your intelligence logs.";
+      }
+      return message.content || "Empty response from OpenAI.";
+    }
+
+    if (provider === 'claude') {
+      const ai = getClaude();
+      if (!ai) return "Claude (Anthropic) key is missing. Please add it to Settings.";
+
+      const response = await ai.messages.create({
+        model: "claude-3-5-sonnet-latest",
+        max_tokens: 1024,
+        system: systemInstruction,
+        messages: messages.map(msg => ({
+          role: msg.role === 'assistant' ? 'assistant' : 'user',
+          content: msg.parts[0].text
+        })) as any,
+        tools: [
+          {
+            name: "add_reminder",
+            description: "Adds a new reminder",
+            input_schema: {
+              type: "object",
+              properties: {
+                text: { type: "string" },
+                time: { type: "string" },
+                priority: { type: "string", enum: ["low", "medium", "high"] }
+              },
+              required: ["text", "time"]
+            }
+          },
+          {
+            name: "add_schedule_item",
+            description: "Adds a schedule event",
+            input_schema: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                startTime: { type: "string" },
+                endTime: { type: "string" },
+                category: { type: "string", enum: ["work", "personal", "health", "other"] }
+              },
+              required: ["title", "startTime", "endTime"]
+            }
+          }
+        ]
+      });
+
+      const toolUse = response.content.find(c => c.type === 'tool_use');
+      if (toolUse && toolUse.type === 'tool_use') {
+        onFunctionCall(toolUse.name, toolUse.input);
+        return "Intelligence updated via Claude hardware.";
+      }
+
+      const textContent = response.content.find(c => c.type === 'text');
+      return textContent && textContent.type === 'text' ? textContent.text : "Claude response empty.";
+    }
+
+    return "Unknown provider configuration.";
   } catch (error) {
     console.error("Aura API Error:", error);
-    return "I encountered an error while trying to help. Please check your connection.";
+    return `The ${provider} cortex encountered an error. Check your API key integrity.`;
   }
 }
