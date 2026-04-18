@@ -146,10 +146,16 @@ export default function App() {
 
   // Load from local storage
   useEffect(() => {
-    const savedReminders = localStorage.getItem('aura_reminders');
-    const savedSchedule = localStorage.getItem('aura_schedule');
-    if (savedReminders) setReminders(JSON.parse(savedReminders));
-    if (savedSchedule) setSchedule(JSON.parse(savedSchedule));
+    try {
+      const savedReminders = localStorage.getItem('aura_reminders');
+      const savedSchedule = localStorage.getItem('aura_schedule');
+      if (savedReminders) setReminders(JSON.parse(savedReminders));
+      if (savedSchedule) setSchedule(JSON.parse(savedSchedule));
+    } catch (err) {
+      console.error("Failed to load persistence layer:", err);
+      localStorage.removeItem('aura_reminders');
+      localStorage.removeItem('aura_schedule');
+    }
 
     // Initial message
     setMessages([{

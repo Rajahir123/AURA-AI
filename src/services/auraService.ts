@@ -6,7 +6,21 @@
 import { GoogleGenAI, Type, FunctionDeclaration, Modality } from "@google/genai";
 import { Reminder, ScheduleItem } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY as string });
+let aiInstance: GoogleGenAI | null = null;
+
+function getAi() {
+  if (aiInstance) return aiInstance;
+  
+  const apiKey = (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || 
+                 (import.meta as any).env?.VITE_GEMINI_API_KEY;
+                 
+  if (!apiKey || apiKey === 'undefined') {
+    return null;
+  }
+  
+  aiInstance = new GoogleGenAI(apiKey);
+  return aiInstance;
+}
 
 export const addReminderTool: FunctionDeclaration = {
   name: "add_reminder",
@@ -62,6 +76,9 @@ export const addScheduleItemTool: FunctionDeclaration = {
 
 export async function getAuraVoice(text: string) {
   try {
+    const ai = getAi();
+    if (!ai) throw new Error("Aura AI Assistant: GEMINI_API_KEY is not configured.");
+
     const response = await ai.models.generateContent({
       model: "gemini-3.1-flash-tts-preview",
       contents: [{ parts: [{ text: `Speak this in a warm, helpful Hindi voice: ${text}` }] }],
@@ -97,6 +114,9 @@ export async function chatWithAura(
   onFunctionCall: (name: string, args: any) => void
 ) {
   try {
+    const ai = getAi();
+    if (!ai) return "Aura configuration incomplete. Please set the GEMINI_API_KEY environment variable.";
+
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: messages.map(msg => ({
