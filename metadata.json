@@ -1,0 +1,6 @@
+{
+  "name": "Aura AI Assistant",
+  "description": "A personal screen-aware assistant that manages your schedule, sets reminders, and provides intelligent task automation.",
+  "requestFramePermissions": ["camera", "microphone", "display-capture"],
+  "majorCapabilities": ["Multimodal AI", "Screen Sharing Analysis", "Task Automation"]
+}
