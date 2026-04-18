@@ -31,29 +31,28 @@ export function saveStoredKeys(keys: APIKeys) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(keys));
 }
 
-let geminiInstance: GoogleGenAI | null = null;
-let openaiInstance: OpenAI | null = null;
-let claudeInstance: Anthropic | null = null;
-
 function getGemini(key?: string) {
-  const finalKey = key || getStoredKeys().gemini || (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  const rawKey = key || getStoredKeys().gemini || (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) || (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  const finalKey = typeof rawKey === 'string' ? rawKey.trim() : rawKey;
+  
   if (!finalKey || finalKey === 'undefined') return null;
-  if (!geminiInstance) geminiInstance = new GoogleGenAI(finalKey);
-  return geminiInstance;
+  return new GoogleGenAI({ apiKey: finalKey });
 }
 
 function getOpenAI(key?: string) {
-  const finalKey = key || getStoredKeys().openai;
+  const rawKey = key || getStoredKeys().openai;
+  const finalKey = typeof rawKey === 'string' ? rawKey.trim() : rawKey;
+  
   if (!finalKey) return null;
-  if (!openaiInstance) openaiInstance = new OpenAI({ apiKey: finalKey, dangerouslyAllowBrowser: true });
-  return openaiInstance;
+  return new OpenAI({ apiKey: finalKey, dangerouslyAllowBrowser: true });
 }
 
 function getClaude(key?: string) {
-  const finalKey = key || getStoredKeys().claude;
+  const rawKey = key || getStoredKeys().claude;
+  const finalKey = typeof rawKey === 'string' ? rawKey.trim() : rawKey;
+  
   if (!finalKey) return null;
-  if (!claudeInstance) claudeInstance = new Anthropic({ apiKey: finalKey, dangerouslyAllowBrowser: true });
-  return claudeInstance;
+  return new Anthropic({ apiKey: finalKey, dangerouslyAllowBrowser: true });
 }
 
 export const addReminderTool: FunctionDeclaration = {
@@ -287,8 +286,9 @@ export async function chatWithAura(
     }
 
     return "Unknown provider configuration.";
-  } catch (error) {
+  } catch (error: any) {
     console.error("Aura API Error:", error);
-    return `The ${provider} cortex encountered an error. Check your API key integrity.`;
+    const apiError = error?.message || "Check your API key integrity or quota.";
+    return `The ${provider} cortex encountered an error: ${apiError}`;
   }
 }
