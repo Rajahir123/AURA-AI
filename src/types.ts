@@ -19,10 +19,19 @@ export interface ScheduleItem {
   category: 'work' | 'personal' | 'health' | 'other';
 }
 
+export interface AutomationSettings {
+  autoAddMeetings: boolean;
+  autoAddReminders: boolean;
+  screenScanningFrequency: number; // in seconds
+  preferredCategories: string[];
+  restrictedApps: string[]; // Names of apps to ignore
+}
+
 export interface AppPreference {
   theme: 'light' | 'dark' | 'system';
   automationLevel: 'manual' | 'suggest' | 'auto';
   voiceEnabled: boolean;
+  automation: AutomationSettings;
 }
 
 export interface ChatMessage {
