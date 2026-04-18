@@ -22,15 +22,26 @@ export interface ScheduleItem {
 export interface AutomationSettings {
   autoAddMeetings: boolean;
   autoAddReminders: boolean;
+  autoTaskManagement: boolean;
   screenScanningFrequency: number; // in seconds
   preferredCategories: string[];
   restrictedApps: string[]; // Names of apps to ignore
+}
+
+export interface Alarm {
+  id: string;
+  time: string; // 24h format HH:mm
+  label: string;
+  enabled: boolean;
+  days: number[]; // 0-6
 }
 
 export interface AppPreference {
   theme: 'light' | 'dark' | 'system';
   automationLevel: 'manual' | 'suggest' | 'auto';
   voiceEnabled: boolean;
+  preferredVoice: 'Kore' | 'Puck' | 'Charon' | 'Fenrir' | 'Zephyr';
+  activeModule: 'sight' | 'timeline' | 'calendar' | 'alarms';
   automation: AutomationSettings;
 }
 

@@ -6,7 +6,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Plus, 
-  Calendar, 
+  Calendar as CalendarIcon, 
   Bell, 
   MessageSquare, 
   Monitor, 
@@ -26,10 +26,15 @@ import {
   MicOff,
   Layout,
   Eye,
-  Activity
+  Activity,
+  History,
+  X,
+  PlusCircle,
+  CalendarDays,
+  AlarmClock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Reminder, ScheduleItem, ChatMessage, AppPreference } from './types';
+import { Reminder, ScheduleItem, ChatMessage, AppPreference, Alarm } from './types';
 import { 
   chatWithAura, 
   getAuraVoice, 
@@ -45,16 +50,20 @@ export default function App() {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [schedule, setSchedule] = useState<ScheduleItem[]>([]);
   const [isScreenActive, setIsScreenActive] = useState(false);
+  const [alarms, setAlarms] = useState<Alarm[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [viewMode, setViewMode] = useState<'sight' | 'timeline'>('sight');
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [preferences, setPreferences] = useState<AppPreference>({
     theme: 'dark',
     automationLevel: 'suggest',
     voiceEnabled: false,
+    preferredVoice: 'Kore',
+    activeModule: 'sight',
     automation: {
       autoAddMeetings: false,
       autoAddReminders: true,
+      autoTaskManagement: true,
       screenScanningFrequency: 30,
       preferredCategories: ['work', 'personal'],
       restrictedApps: ['Banking', 'Private Messenger']
@@ -76,10 +85,37 @@ export default function App() {
   // Initialize audio context for playback
   useEffect(() => {
     audioRef.current = new Audio();
+    audioRef.current.onplay = () => setIsSpeaking(true);
+    audioRef.current.onended = () => setIsSpeaking(false);
+    audioRef.current.onpause = () => setIsSpeaking(false);
     return () => {
       audioRef.current?.pause();
     };
   }, []);
+
+  // Alarm System Logic
+  useEffect(() => {
+    const checkAlarms = setInterval(() => {
+      const now = new Date();
+      const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      const currentDay = now.getDay();
+
+      alarms.forEach(alarm => {
+        if (alarm.enabled && alarm.time === currentTime && alarm.days.includes(currentDay)) {
+          // Trigger Alarm
+          if (notificationStatus === 'granted') {
+            new Notification("AURA ALARM", {
+              body: alarm.label || "Time is up.",
+              icon: "https://picsum.photos/seed/alarm/128/128"
+            });
+          }
+          playVoice(`Your alarm for ${alarm.label || 'scheduled time'} is triggering now.`);
+        }
+      });
+    }, 60000); // Check every minute
+
+    return () => clearInterval(checkAlarms);
+  }, [alarms, notificationStatus, preferences.voiceEnabled]);
 
   // Initialize Speech Recognition
   useEffect(() => {
@@ -120,7 +156,7 @@ export default function App() {
 
   const playVoice = async (text: string) => {
     if (!preferences.voiceEnabled) return;
-    const base64Audio = await getAuraVoice(text);
+    const base64Audio = await getAuraVoice(text, preferences.preferredVoice);
     if (base64Audio && audioRef.current) {
       const binary = atob(base64Audio);
       const bytes = new Uint8Array(binary.length);
@@ -395,208 +431,628 @@ export default function App() {
     notifiedItems.current.delete(id);
   };
 
+  const addAlarm = (time: string, label: string) => {
+    const newAlarm: Alarm = {
+      id: Math.random().toString(36).substring(7),
+      time,
+      label,
+      enabled: true,
+      days: [0, 1, 2, 3, 4, 5, 6]
+    };
+    setAlarms(prev => [...prev, newAlarm]);
+  };
+
+  const deleteAlarm = (id: string) => {
+    setAlarms(prev => prev.filter(a => a.id !== id));
+  };
+
+  const toggleAlarm = (id: string) => {
+    setAlarms(prev => prev.map(a => a.id === id ? { ...a, enabled: !a.enabled } : a));
+  };
+
+  // Sub-Components
+  const VoiceVisualizer = () => (
+    <div className="flex items-center gap-1.5 h-12 bg-black/40 px-6 rounded-3xl border border-white/5 shadow-inner">
+       {[...Array(12)].map((_, i) => (
+        <motion.div
+          key={i}
+          animate={{ 
+            height: isListening || isSpeaking ? [8, 30, 12, 24, 8] : 8,
+            opacity: isListening || isSpeaking ? 1 : 0.3,
+            backgroundColor: isListening ? '#f87171' : isSpeaking ? '#00f2ff' : '#ffffff'
+          }}
+          transition={{ 
+            repeat: Infinity, 
+            duration: 0.5 + Math.random() * 0.5,
+            ease: "easeInOut",
+            delay: i * 0.05
+          }}
+          className="w-1.5 rounded-full"
+        />
+      ))}
+    </div>
+  );
+
+  const CalendarModule = () => {
+    const today = new Date();
+    const [currentMonth, setCurrentMonth] = useState(new Date());
+    
+    const daysInMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0).getDate();
+    const firstDay = new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).getDay();
+    
+    const monthName = currentMonth.toLocaleString('default', { month: 'long' });
+    
+    return (
+      <div className="p-10 h-full overflow-y-auto bg-black/20">
+        <div className="flex items-center justify-between mb-6 px-4">
+           <div className="text-[10px] font-bold tracking-[0.4em] text-accent uppercase">Chrono-Visualization Module</div>
+           <div className="text-[10px] font-mono text-zinc-500">SYNC_BUFFER: OK // NODE: PRIMARY</div>
+        </div>
+        <div className="flex items-center justify-between mb-12">
+          <div>
+            <h2 className="text-4xl font-light tracking-tighter uppercase">{monthName}</h2>
+            <div className="text-xs text-zinc-500 font-mono tracking-widest mt-1">LUNAR-CHRONO POSITION: {currentMonth.getFullYear()}</div>
+          </div>
+          <div className="flex gap-2">
+            <button 
+              onClick={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() - 1)))}
+              className="p-3 bg-white/5 border border-white/10 rounded-2xl hover:border-accent transition-all"
+            >
+              <ChevronRight className="w-5 h-5 rotate-180" />
+            </button>
+            <button 
+              onClick={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() + 1)))}
+              className="p-3 bg-white/5 border border-white/10 rounded-2xl hover:border-accent transition-all"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-7 gap-4 mb-8">
+          {['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'].map(d => (
+            <div key={d} className="text-center text-[10px] font-bold text-zinc-500 tracking-widest">{d}</div>
+          ))}
+          {[...Array(firstDay)].map((_, i) => <div key={`empty-${i}`} />)}
+          {[...Array(daysInMonth)].map((_, i) => {
+            const day = i + 1;
+            const isToday = today.getDate() === day && today.getMonth() === currentMonth.getMonth() && today.getFullYear() === currentMonth.getFullYear();
+            const dateStr = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+            const hasItems = schedule.some(item => item.startTime.startsWith(dateStr));
+            return (
+              <motion.button
+                key={day}
+                whileHover={{ scale: 1.05 }}
+                className={`aspect-square rounded-3xl border flex flex-col items-center justify-center relative transition-all ${
+                  isToday 
+                  ? 'bg-accent border-accent text-black shadow-[0_0_20px_rgba(0,242,255,0.3)]' 
+                  : 'bg-white/[0.03] border-white/5 hover:border-white/20'
+                }`}
+              >
+                <div className="text-lg font-bold">{day}</div>
+                {hasItems && <div className={`w-1 h-1 rounded-full mt-1 ${isToday ? 'bg-black' : 'bg-accent animate-pulse'}`} />}
+              </motion.button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const AlarmModule = () => {
+    const [newAlarmTime, setNewAlarmTime] = useState('08:00');
+    const [newAlarmLabel, setNewAlarmLabel] = useState('');
+
+    return (
+      <div className="p-10 h-full overflow-y-auto bg-black/20">
+        <h2 className="text-4xl font-light tracking-tighter uppercase mb-2">NEURAL ALARMS</h2>
+        <p className="text-sm text-zinc-400 mb-12">Set time-critical triggers for your bio-cycle.</p>
+
+        <div className="bg-white/[0.03] border border-white/10 p-8 rounded-[32px] mb-12">
+          <div className="flex gap-4 items-end mb-6">
+            <div className="flex-1">
+              <label className="block text-[10px] text-zinc-500 uppercase font-bold tracking-widest mb-2 ml-1">TRUNCATED TIME</label>
+              <input 
+                type="time" 
+                value={newAlarmTime}
+                onChange={(e) => setNewAlarmTime(e.target.value)}
+                className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-2xl font-mono text-accent focus:border-accent outline-none"
+              />
+            </div>
+            <div className="flex-[2]">
+              <label className="block text-[10px] text-zinc-500 uppercase font-bold tracking-widest mb-2 ml-1">ALARM LABEL</label>
+              <input 
+                placeholder="Biological Restart..."
+                value={newAlarmLabel}
+                onChange={(e) => setNewAlarmLabel(e.target.value)}
+                className="w-full bg-black/40 border border-white/10 rounded-2xl px-6 py-4 text-lg focus:border-accent outline-none"
+              />
+            </div>
+            <button 
+              onClick={() => { addAlarm(newAlarmTime, newAlarmLabel); setNewAlarmLabel(''); }}
+              className="p-5 bg-accent text-black rounded-2xl hover:scale-95 transition-all shadow-[0_0_20px_rgba(0,242,255,0.2)]"
+            >
+              <Plus className="w-6 h-6 font-bold" />
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-6">
+          {alarms.map(alarm => (
+            <motion.div 
+              layout
+              key={alarm.id} 
+              className={`p-8 rounded-[36px] border transition-all ${alarm.enabled ? 'bg-accent/5 border-accent/20' : 'bg-white/[0.02] border-white/5 opacity-50'}`}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-4xl font-mono font-bold tracking-tighter">{alarm.time}</div>
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => toggleAlarm(alarm.id)}
+                    className={`w-12 h-6 rounded-full relative transition-all ${alarm.enabled ? 'bg-accent' : 'bg-zinc-700'}`}
+                  >
+                    <motion.div 
+                      animate={{ x: alarm.enabled ? 24 : 4 }}
+                      className="absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm" 
+                    />
+                  </button>
+                  <button onClick={() => deleteAlarm(alarm.id)} className="p-2 text-zinc-500 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>
+                </div>
+              </div>
+              <div className="text-xs uppercase tracking-[0.2em] font-bold text-zinc-400">{alarm.label || 'Standard Alarm'}</div>
+            </motion.div>
+          ))}
+          {alarms.length === 0 && (
+            <div className="col-span-2 text-center py-20 opacity-20 border-2 border-dashed border-white/5 rounded-[40px]">
+              <AlarmClock className="w-16 h-16 mx-auto mb-4" />
+              <div className="text-xl font-light">NO ALARMS ACTIVE IN SECTOR</div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="flex h-screen bg-[#050505] text-white font-sans overflow-hidden">
-      <div className="flex-1 grid grid-cols-[280px_1fr_280px] grid-rows-[80px_1fr_100px] gap-[1px] bg-white/5">
+      {/* Left Navigation Rail */}
+      <nav className="w-20 border-r border-white/10 bg-[#0A0A0A] flex flex-col items-center py-8 gap-8 z-30">
+        <div className="text-accent font-bold text-xl tracking-tighter">A.</div>
         
-        <header className="col-start-1 col-end-4 bg-[#0A0A0A]/80 backdrop-blur-md border-b border-white/10 flex items-center justify-between px-10 z-20">
-          <div className="flex items-center gap-3">
+        <div className="flex-1 flex flex-col gap-4">
+          {[
+            { id: 'sight', icon: Eye, label: 'SIGHT' },
+            { id: 'timeline', icon: History, label: 'CHRONO' },
+            { id: 'calendar', icon: CalendarDays, label: 'PLAN' },
+            { id: 'alarms', icon: AlarmClock, label: 'BIO' },
+          ].map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setPreferences(prev => ({ ...prev, activeModule: item.id as any }))}
+              className={`p-4 rounded-2xl transition-all group relative ${
+                preferences.activeModule === item.id 
+                ? 'bg-accent/10 text-accent shadow-[0_0_15px_rgba(0,242,255,0.1)]' 
+                : 'text-zinc-500 hover:text-white'
+              }`}
+              title={item.label}
+            >
+              <item.icon className="w-6 h-6" />
+              {preferences.activeModule === item.id && (
+                <motion.div 
+                  layoutId="activeNav" 
+                  className="absolute left-0 top-2 bottom-2 w-1 bg-accent rounded-r-full" 
+                />
+              )}
+            </button>
+          ))}
+        </div>
+
+        <button 
+          onClick={() => setIsSettingsOpen(true)}
+          className="p-4 text-zinc-500 hover:text-white transition-colors"
+          aria-label="Open Settings"
+        >
+          <Settings className="w-6 h-6" />
+        </button>
+      </nav>
+
+      <div className="flex-1 flex flex-col min-w-0">
+        <header className="h-20 bg-[#0A0A0A]/80 backdrop-blur-md border-b border-white/10 flex items-center justify-between px-10 z-20">
+          <div className="flex flex-col">
             <div className="text-xl font-bold tracking-[0.2em]">
               AURA<span className="text-accent">.core</span>
             </div>
+            <div className="text-[9px] text-zinc-500 tracking-[0.3em] font-bold uppercase mt-1">MODULE: {preferences.activeModule}</div>
           </div>
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-3 text-[13px] text-[#8e8e93]">
+          
+          <div className="flex items-center gap-8">
+            <VoiceVisualizer />
+            <div className="flex items-center gap-3 text-[12px] text-zinc-400 font-mono">
               <div className="w-2 h-2 rounded-full bg-accent shadow-[0_0_10px_#00f2ff] animate-pulse" />
-              SYSTEM ONLINE
+              LINK ESTABLISHED
             </div>
-            <button 
-              onClick={() => setIsSettingsOpen(true)}
-              className="p-2 hover:bg-white/5 rounded-full transition-colors text-[#8e8e93] hover:text-white"
-            >
-              <Settings className="w-5 h-5" />
-            </button>
           </div>
         </header>
 
-        {/* Settings Overlay */}
-        <AnimatePresence>
-          {isSettingsOpen && (
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-xl flex items-center justify-center p-6"
-            >
-              <motion.div 
-                initial={{ scale: 0.95, y: 20 }}
-                animate={{ scale: 1, y: 0 }}
-                className="w-full max-w-2xl bg-[#0A0A0A] border border-white/10 rounded-[32px] overflow-hidden shadow-2xl"
-              >
-                <div className="p-8 border-b border-white/5 flex items-center justify-between">
-                  <div>
-                    <h2 className="text-2xl font-bold tracking-tight">Automation Protocol</h2>
-                    <p className="text-sm text-[#8e8e93] mt-1">Configure how Aura interacts with your OS environment.</p>
+        <main className="flex-1 flex overflow-hidden">
+          {/* Main Content Area */}
+          <div className="flex-1 relative bg-black/40 overflow-hidden">
+            <AnimatePresence mode="wait">
+              {preferences.activeModule === 'sight' && (
+                <motion.div 
+                  key="sight"
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 1.02 }}
+                  className="w-full h-full p-8"
+                >
+                  <div className="flex items-center justify-between mb-6 px-4">
+                    <div>
+                      <h2 className="text-sm font-bold tracking-[0.3em] uppercase">Visual Neural Feed</h2>
+                      <p className="text-[10px] text-zinc-500 font-mono mt-1">STATUS: {isScreenActive ? 'LINK_ESTABLISHED' : 'LINK_INACTIVE'}</p>
+                    </div>
+                    <div className="flex items-center gap-4 bg-white/5 px-4 py-2 rounded-xl border border-white/10">
+                       <Monitor className="w-3 h-3 text-accent" />
+                       <span className="text-[10px] font-bold text-zinc-400">FPS: 30 // BUF: 128MB</span>
+                    </div>
                   </div>
-                  <button 
-                    onClick={() => setIsSettingsOpen(false)}
-                    className="p-2 hover:bg-white/5 rounded-full transition-colors"
-                  >
-                    <Plus className="w-6 h-6 rotate-45" />
-                  </button>
-                </div>
-
-                <div className="p-8 space-y-8 overflow-y-auto max-h-[70vh] scrollbar-hide">
-                  {/* Level Selection */}
-                  <section>
-                    <h3 className="text-[11px] uppercase tracking-[0.2em] text-accent font-bold mb-4">Neural Cortices (AI Models)</h3>
-                    <div className="space-y-6">
-                      <div className="grid grid-cols-3 gap-3">
-                        {(['gemini', 'openai', 'claude'] as const).map((p) => (
-                          <button
-                            key={p}
-                            onClick={() => setActiveProvider(p)}
-                            className={`p-4 rounded-2xl border text-left transition-all ${
-                              activeProvider === p 
-                              ? 'bg-accent/10 border-accent text-accent shadow-[0_0_20px_rgba(0,242,255,0.1)]' 
-                              : 'bg-white/[0.03] border-white/5 text-[#8e8e93] hover:border-white/20'
-                            }`}
-                          >
-                            <div className="text-xs font-bold uppercase tracking-widest mb-1">{p === 'openai' ? 'ChatGPT' : p === 'claude' ? 'Claude' : 'Gemini'}</div>
-                            <div className="text-[10px] leading-tight flex items-center gap-1 opacity-60">
-                              {p === 'gemini' && "Recommended"}
-                              {p === 'openai' && "GPT-4o Intelligence"}
-                              {p === 'claude' && "Sonnet 3.5 Logic"}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-
-                      <div className="space-y-4 bg-white/[0.02] border border-white/5 p-6 rounded-[24px]">
-                        <h4 className="text-[10px] uppercase tracking-[0.15em] text-[#8e8e93] mb-4">Manual Key Entry</h4>
-                        <div className="space-y-4">
-                          <div>
-                            <label className="block text-[10px] text-[#8e8e93] uppercase tracking-widest mb-2 ml-1">Gemini API Key</label>
-                            <input 
-                              type="password"
-                              value={apiKeys.gemini || ''}
-                              onChange={(e) => setApiKeys(prev => ({ ...prev, gemini: e.target.value }))}
-                              placeholder="Enter Gemini Key..."
-                              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:border-accent outline-none transition-all placeholder:text-white/10"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-[#8e8e93] uppercase tracking-widest mb-2 ml-1">OpenAI API Key</label>
-                            <input 
-                              type="password"
-                              value={apiKeys.openai || ''}
-                              onChange={(e) => setApiKeys(prev => ({ ...prev, openai: e.target.value }))}
-                              placeholder="sk-..."
-                              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:border-accent outline-none transition-all placeholder:text-white/10"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[10px] text-[#8e8e93] uppercase tracking-widest mb-2 ml-1">Anthropic API Key</label>
-                            <input 
-                              type="password"
-                              value={apiKeys.claude || ''}
-                              onChange={(e) => setApiKeys(prev => ({ ...prev, claude: e.target.value }))}
-                              placeholder="sk-ant-..."
-                              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm focus:border-accent outline-none transition-all placeholder:text-white/10"
-                            />
-                          </div>
+                  <div className="w-full h-[calc(100%-80px)] bg-[#111] rounded-[40px] border border-white/10 overflow-hidden relative shadow-2xl">
+                    {isScreenActive ? (
+                      <video ref={videoRef} autoPlay className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center gap-6">
+                        <div className="w-24 h-24 bg-accent/5 rounded-[40px] flex items-center justify-center border border-accent/20 rotate-12">
+                          <Monitor className="w-10 h-10 text-accent/40" />
                         </div>
-                        <p className="text-[9px] text-[#8e8e93] mt-4 leading-relaxed italic">
-                          *Keys are stored locally in your neural buffer (localStorage) and never transmitted to our servers.
-                        </p>
+                        <div className="text-center">
+                          <h3 className="text-2xl font-light mb-2">ACTIVE SIGHT BUFFER</h3>
+                          <p className="text-zinc-500 text-sm mb-6">Authorize neural link to scan environmental data.</p>
+                          <button 
+                            onClick={startScreenShare} 
+                            className="px-8 py-3 bg-accent/5 border border-accent/20 text-accent rounded-2xl text-xs font-bold tracking-[0.2em] hover:bg-accent/10 transition-all uppercase"
+                          >
+                            Establish Link
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {isScreenActive && (
+                      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex items-center gap-4 px-6 py-3 bg-black/80 backdrop-blur-xl border border-white/10 rounded-2xl">
+                        <div className="flex items-center gap-2 text-[10px] font-bold tracking-widest text-red-500 uppercase">
+                          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                          Live Stream Active
+                        </div>
+                        <div className="w-px h-4 bg-white/10" />
+                        <button onClick={stopScreenShare} className="text-[10px] font-bold text-white/50 hover:text-white transition-colors">DISCONNECT</button>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+
+              {preferences.activeModule === 'timeline' && (
+                <motion.div 
+                  key="timeline"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  className="w-full h-full p-8 overflow-y-auto scrollbar-hide"
+                >
+                  <div className="max-w-4xl mx-auto">
+                    <div className="flex items-start justify-between mb-16 px-4">
+                      <div className="text-6xl font-light tracking-tighter uppercase leading-none">Day<br/>Overview</div>
+                      <div className="text-right">
+                        <div className="text-2xl font-bold text-accent">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</div>
+                        <div className="text-[10px] text-zinc-500 tracking-[0.3em] uppercase font-bold mt-2">Neural Scan: {preferences.automation.autoTaskManagement ? 'AUTONOMOUS' : 'MANUAL'}</div>
                       </div>
                     </div>
-                  </section>
 
-                  {/* Level Selection */}
-                  <section>
-                    <h3 className="text-[11px] uppercase tracking-[0.2em] text-accent font-bold mb-4">Core Automation Level</h3>
-                    <div className="grid grid-cols-3 gap-3">
-                      {(['manual', 'suggest', 'auto'] as const).map((level) => (
+                    <div className="relative pl-24 space-y-12">
+                      <div className="absolute left-[39px] top-0 bottom-0 w-px bg-gradient-to-b from-accent/50 via-accent/5 to-transparent" />
+                      
+                      {[
+                        ...schedule.map(s => ({ ...s, time: s.startTime, type: 'schedule' })),
+                        ...reminders.map(r => ({ ...r, title: r.text, type: 'reminder', time: r.time || Date.now().toString() }))
+                      ]
+                      .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
+                      .map((item: any) => (
+                        <div key={item.id} className="relative group">
+                          <div className="absolute -left-[75px] top-1 text-[11px] font-mono text-zinc-500 bg-[#050505] px-2 py-1 rounded-md z-10 transition-colors group-hover:text-accent font-bold border border-white/5">
+                            {new Date(item.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                          <div className={`absolute -left-[44px] top-2 w-3 h-3 rounded-full border-2 border-[#050505] ring-2 ring-accent/20 z-10 ${item.type === 'schedule' ? 'bg-accent shadow-[0_0_10px_rgba(0,242,255,0.5)]' : 'bg-white/10'}`} />
+                          
+                          <motion.div 
+                            whileHover={{ scale: 1.01, x: 10 }}
+                            className="bg-white/[0.03] border border-white/5 p-8 rounded-[40px] hover:border-accent/30 transition-all hover:bg-white/[0.05] shadow-sm"
+                          >
+                            <div className="flex items-start justify-between mb-3">
+                               <div className="font-bold text-2xl tracking-tight leading-tight">{item.title}</div>
+                               <div className={`text-[10px] px-3 py-1 rounded-full font-bold tracking-widest ${item.type === 'schedule' ? 'bg-accent/10 text-accent border border-accent/20' : 'bg-white/5 text-zinc-400 border border-white/10'}`}>
+                                 {item.type.toUpperCase()}
+                               </div>
+                            </div>
+                            <div className="text-sm text-zinc-500 leading-relaxed font-medium">
+                              {item.type === 'schedule' 
+                                ? `Protocol Duration: ${Math.round((new Date((item as any).endTime).getTime() - new Date((item as any).startTime).getTime()) / 60000)}m`
+                                : `Bio-Priority: ${item.priority || 'standard'}`}
+                            </div>
+                          </motion.div>
+                        </div>
+                      ))}
+
+                      {schedule.length === 0 && reminders.length === 0 && (
+                        <div className="text-center py-32 opacity-20">
+                          <Activity className="w-20 h-20 mx-auto mb-6 text-zinc-500 animate-pulse" />
+                          <div className="text-2xl font-light tracking-[0.3em] uppercase">Sector Empty</div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {preferences.activeModule === 'calendar' && <motion.div key="calendar" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="h-full"><CalendarModule /></motion.div>}
+              {preferences.activeModule === 'alarms' && <motion.div key="alarms" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="h-full"><AlarmModule /></motion.div>}
+            </AnimatePresence>
+          </div>
+
+          {/* Right Contextual Rail */}
+          <aside className="w-[320px] bg-[#0A0A0A] border-l border-white/10 p-8 flex flex-col gap-10 overflow-hidden">
+             {/* Log Terminal */}
+             <div className="flex-1 flex flex-col min-h-0 bg-black/40 border border-white/5 rounded-[32px] overflow-hidden">
+                <div className="p-4 border-b border-white/5 flex items-center justify-between text-[10px] font-bold text-zinc-500 tracking-widest uppercase">
+                  <span>Assistant Logs</span>
+                  <div className="flex gap-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-yellow-400" />
+                    <div className="w-1.5 h-1.5 rounded-full bg-green-400" />
+                  </div>
+                </div>
+                <div className="flex-1 p-5 overflow-y-auto scrollbar-hide font-mono text-[11px] text-[#00ff66]/80 leading-relaxed bg-[#050505]">
+                  {messages.length === 0 ? (
+                    <div className="animate-pulse">{">"} READY_FOR_COMMAND_</div>
+                  ) : (
+                    messages.map(m => (
+                      <div key={m.id} className={`mb-3 ${m.role === 'assistant' ? 'text-[#00ff66]' : 'text-zinc-500 opacity-60'}`}>
+                        <span className="opacity-40">{new Date(m.timestamp).toLocaleTimeString([], { hour12: false })}</span> [{m.role.toUpperCase()}] {m.content}
+                      </div>
+                    ))
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+             </div>
+
+             {/* Dynamic Tasks/Context List */}
+             <div className="h-1/3 flex flex-col gap-4">
+               <div className="flex items-center justify-between">
+                 <h3 className="text-[11px] uppercase tracking-[0.2em] text-zinc-400 font-bold">Bio-Tasks</h3>
+                 <span className="text-[10px] px-2 py-0.5 bg-accent/10 text-accent rounded-full font-bold">{reminders.length}</span>
+               </div>
+               <div className="flex-1 overflow-y-auto space-y-3 scrollbar-hide">
+                 {reminders.filter(r => !r.completed).map(r => (
+                   <div key={r.id} className="p-4 bg-white/[0.03] border border-white/5 rounded-2xl group relative overflow-hidden">
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => toggleReminder(r.id)} className="w-4 h-4 rounded-full border border-white/20 hover:border-accent transition-colors" />
+                        <div className="text-sm font-medium leading-tight truncate">{r.text}</div>
+                      </div>
+                      <button 
+                        onClick={() => deleteReminder(r.id)} 
+                        className="absolute right-2 top-1/2 -translate-y-1/2 p-2 opacity-0 group-hover:opacity-100 text-zinc-500 hover:text-red-400 transition-all font-bold text-[10px]"
+                      >
+                        PURGE
+                      </button>
+                   </div>
+                 ))}
+                 {reminders.length === 0 && <div className="text-center py-8 text-[10px] text-zinc-600 uppercase font-bold tracking-widest italic">All Tasks Cycled</div>}
+               </div>
+             </div>
+          </aside>
+        </main>
+
+        <footer className="h-28 border-t border-white/10 px-10 flex items-center bg-[#0A0A0A] z-20">
+          <div className="w-full flex items-center gap-6 max-w-5xl mx-auto">
+            <div className="flex gap-2">
+               <button 
+                onClick={() => setPreferences(prev => ({ ...prev, voiceEnabled: !prev.voiceEnabled }))}
+                className={`w-12 h-12 rounded-3xl flex items-center justify-center transition-all ${preferences.voiceEnabled ? 'bg-accent/10 text-accent border border-accent/20' : 'bg-white/5 text-zinc-500 border border-white/10'}`}
+                aria-label={preferences.voiceEnabled ? "Mute Aura" : "Unmute Aura"}
+              >
+                {preferences.voiceEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+              </button>
+              <button 
+                onClick={toggleListening}
+                className={`w-12 h-12 rounded-3xl flex items-center justify-center transition-all ${isListening ? 'bg-red-500/10 text-red-400 border border-red-500/20 shadow-[0_0_15px_rgba(248,113,113,0.3)]' : 'bg-white/5 text-zinc-500 border border-white/10'}`}
+                aria-label={isListening ? "Stop listening" : "Start command"}
+              >
+                {isListening ? <Mic className="w-5 h-5 animate-pulse" /> : <MicOff className="w-5 h-5" />}
+              </button>
+            </div>
+            
+            <div className="flex-1 relative group">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+                placeholder="Neural link input..."
+                className="w-full bg-white/[0.03] border border-white/10 rounded-3xl px-8 py-4 text-sm focus:outline-none focus:border-accent/40 focus:bg-white/[0.05] transition-all resize-none h-14 pr-16 placeholder:text-zinc-600"
+                aria-label="Aura command input"
+              />
+              <button 
+                onClick={() => handleSend()}
+                className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-accent hover:scale-110 transition-transform disabled:opacity-30"
+                disabled={!input.trim()}
+              >
+                <Send className="w-5 h-5" />
+              </button>
+            </div>
+          </div>
+        </footer>
+      </div>
+      <SettingsOverlay />
+    </div>
+  );
+
+  function SettingsOverlay() {
+    return (
+      <AnimatePresence>
+        {isSettingsOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-2xl flex items-center justify-center p-6"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 30 }}
+              animate={{ scale: 1, y: 0 }}
+              className="w-full max-w-2xl bg-[#0A0A0A] border border-white/10 rounded-[48px] overflow-hidden shadow-3xl"
+            >
+              <div className="p-10 border-b border-white/10 flex items-center justify-between bg-white/[0.02]">
+                <div>
+                  <h2 className="text-3xl font-bold tracking-tight uppercase">Protocol Configuration</h2>
+                  <p className="text-xs text-zinc-500 mt-2 font-mono tracking-widest uppercase">Kernel Version 3.4.1//NEURAL_LINK</p>
+                </div>
+                <button 
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="p-4 bg-white/5 hover:bg-white/10 rounded-full transition-all border border-white/10"
+                  aria-label="Close Settings"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="p-10 space-y-10 overflow-y-auto max-h-[60vh] scrollbar-hide">
+                {/* Level Selection */}
+                <section>
+                  <h3 className="text-[11px] uppercase tracking-[0.3em] text-accent font-bold mb-6">Neural Cortices Selection</h3>
+                  <div className="grid grid-cols-3 gap-4">
+                    {(['gemini', 'openai', 'claude'] as const).map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => setActiveProvider(p)}
+                        className={`p-6 rounded-[32px] border text-left transition-all ${
+                          activeProvider === p 
+                          ? 'bg-accent/10 border-accent text-accent shadow-[0_0_20px_rgba(0,242,255,0.15)]' 
+                          : 'bg-white/[0.03] border-white/10 text-zinc-400 hover:border-white/20'
+                        }`}
+                      >
+                        <div className="text-[10px] font-bold uppercase tracking-[0.2em] mb-2">{p}</div>
+                        <div className="text-[9px] leading-tight flex items-center gap-1 opacity-60 uppercase font-bold">
+                          {p === 'gemini' && "Native Link"}
+                          {p === 'openai' && "External V4"}
+                          {p === 'claude' && "Logical Core"}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+
+                {/* API Key Table */}
+                <section className="bg-white/5 border border-white/10 p-8 rounded-[40px] space-y-6">
+                   <h4 className="text-[10px] uppercase tracking-[0.3em] text-zinc-400 font-bold border-b border-white/5 pb-4">Encryption Keys</h4>
+                   <div className="space-y-4">
+                      {['gemini', 'openai', 'claude'].map(k => (
+                        <div key={k}>
+                          <label className="block text-[9px] text-zinc-500 uppercase tracking-widest mb-2 px-1 font-bold">{k} Access Token</label>
+                          <input 
+                            type="password"
+                            value={apiKeys[k as keyof APIKeys] || ''}
+                            onChange={(e) => setApiKeys(prev => ({ ...prev, [k]: e.target.value }))}
+                            placeholder={`Authorize ${k}...`}
+                            className="w-full bg-black/60 border border-white/10 rounded-2xl px-5 py-3 text-xs focus:border-accent outline-none transition-all placeholder:text-zinc-700 font-mono"
+                          />
+                        </div>
+                      ))}
+                   </div>
+                </section>
+
+                <section>
+                   <h3 className="text-[11px] uppercase tracking-[0.3em] text-accent font-bold mb-6">Voice Synthesis Personality</h3>
+                   <div className="grid grid-cols-5 gap-3">
+                      {(['Kore', 'Puck', 'Charon', 'Fenrir', 'Zephyr'] as const).map((v) => (
                         <button
-                          key={level}
-                          onClick={() => setPreferences(prev => ({ ...prev, automationLevel: level }))}
-                          className={`p-4 rounded-2xl border text-left transition-all ${
-                            preferences.automationLevel === level 
-                            ? 'bg-accent/10 border-accent text-accent shadow-[0_0_20px_rgba(0,242,255,0.1)]' 
-                            : 'bg-white/[0.03] border-white/5 text-[#8e8e93] hover:border-white/20'
+                          key={v}
+                          onClick={() => setPreferences(prev => ({ ...prev, preferredVoice: v }))}
+                          className={`py-4 rounded-3xl border text-[9px] font-bold uppercase tracking-widest transition-all ${
+                            preferences.preferredVoice === v 
+                            ? 'bg-accent/10 border-accent text-accent shadow-[0_0_15px_rgba(0,242,255,0.1)]' 
+                            : 'bg-white/[0.03] border-white/10 text-zinc-500 hover:border-zinc-700'
                           }`}
                         >
-                          <div className="text-xs font-bold uppercase tracking-widest mb-1">{level}</div>
-                          <div className="text-[10px] leading-tight flex items-center gap-1 opacity-60">
-                            {level === 'manual' && "User triggers only"}
-                            {level === 'suggest' && "Ask before acting"}
-                            {level === 'auto' && "Autonomous execution"}
-                          </div>
+                          {v}
                         </button>
                       ))}
-                    </div>
-                  </section>
+                   </div>
+                </section>
 
-                  {/* Triggers */}
-                  <section className="grid grid-cols-2 gap-6">
-                    <div>
-                      <h3 className="text-[11px] uppercase tracking-[0.2em] text-[#8e8e93] mb-4">Contextual Triggers</h3>
-                      <div className="space-y-3">
-                        <label className="flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-2xl cursor-pointer hover:bg-white/[0.04] transition-all">
-                          <span className="text-sm">Auto-add Meetings</span>
-                          <input 
-                            type="checkbox" 
-                            checked={preferences.automation.autoAddMeetings}
-                            onChange={(e) => setPreferences(prev => ({
-                              ...prev,
-                              automation: { ...prev.automation, autoAddMeetings: e.target.checked }
-                            }))}
-                            className="w-4 h-4 rounded border-white/10 bg-black text-accent focus:ring-accent"
-                          />
-                        </label>
-                        <label className="flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-2xl cursor-pointer hover:bg-white/[0.04] transition-all">
-                          <span className="text-sm">Capture Reminders</span>
-                          <input 
-                            type="checkbox" 
-                            checked={preferences.automation.autoAddReminders}
-                            onChange={(e) => setPreferences(prev => ({
-                              ...prev,
-                              automation: { ...prev.automation, autoAddReminders: e.target.checked }
-                            }))}
-                            className="w-4 h-4 rounded border-white/10 bg-black text-accent focus:ring-accent"
-                          />
-                        </label>
+                <section className="bg-white/5 p-8 rounded-[40px] flex items-center justify-between">
+                   <div>
+                      <h4 className="text-sm font-bold uppercase tracking-widest">Neural Notification Link</h4>
+                      <p className="text-[10px] text-zinc-500 font-bold uppercase mt-1">Browser-level bio-rhythm sync status: {notificationStatus}</p>
+                   </div>
+                   <button 
+                    onClick={requestNotificationPermission}
+                    className="px-6 py-2 bg-white/10 border border-white/10 rounded-xl text-[10px] font-bold hover:bg-white/20 transition-all uppercase tracking-widest"
+                   >
+                     Update Status
+                   </button>
+                </section>
+
+                {/* New Automation Section */}
+                <section>
+                  <h3 className="text-[11px] uppercase tracking-[0.3em] text-accent font-bold mb-6">Neural Automation Protocols</h3>
+                  <div className="space-y-4">
+                    <label className="flex items-center justify-between p-6 bg-white/[0.03] border border-white/10 rounded-3xl cursor-pointer hover:bg-white/[0.05] transition-all">
+                      <div>
+                        <div className="text-sm font-bold uppercase tracking-widest">Autonomous Task management</div>
+                        <div className="text-[10px] text-zinc-500 mt-1">AI-driven prioritization and cycle optimization.</div>
                       </div>
+                      <input 
+                        type="checkbox" 
+                        checked={preferences.automation.autoTaskManagement}
+                        onChange={(e) => setPreferences(prev => ({
+                          ...prev,
+                          automation: { ...prev.automation, autoTaskManagement: e.target.checked }
+                        }))}
+                        className="w-5 h-5 rounded border-white/20 bg-black text-accent focus:ring-accent"
+                      />
+                    </label>
+                    <div className="grid grid-cols-2 gap-4">
+                      <label className="flex items-center justify-between p-6 bg-white/[0.03] border border-white/10 rounded-3xl cursor-pointer hover:bg-white/[0.05] transition-all">
+                        <span className="text-xs font-bold uppercase tracking-widest">Auto-Add Meetings</span>
+                        <input 
+                          type="checkbox" 
+                          checked={preferences.automation.autoAddMeetings}
+                          onChange={(e) => setPreferences(prev => ({
+                            ...prev,
+                            automation: { ...prev.automation, autoAddMeetings: e.target.checked }
+                          }))}
+                          className="w-4 h-4 rounded border-white/20 bg-black text-accent focus:ring-accent"
+                        />
+                      </label>
+                      <label className="flex items-center justify-between p-6 bg-white/[0.03] border border-white/10 rounded-3xl cursor-pointer hover:bg-white/[0.05] transition-all">
+                        <span className="text-xs font-bold uppercase tracking-widest">Capture Reminders</span>
+                        <input 
+                          type="checkbox" 
+                          checked={preferences.automation.autoAddReminders}
+                          onChange={(e) => setPreferences(prev => ({
+                            ...prev,
+                            automation: { ...prev.automation, autoAddReminders: e.target.checked }
+                          }))}
+                          className="w-4 h-4 rounded border-white/20 bg-black text-accent focus:ring-accent"
+                        />
+                      </label>
                     </div>
+                  </div>
+                </section>
 
-                    <div>
-                      <h3 className="text-[11px] uppercase tracking-[0.2em] text-[#8e8e93] mb-4">Resource Guard</h3>
-                      <div className="space-y-3">
-                        <div className="p-4 bg-white/[0.02] border border-white/10 rounded-2xl">
-                          <div className="text-[11px] text-[#8e8e93] mb-2 uppercase font-bold tracking-widest">Restricted Hosts</div>
-                          <div className="flex flex-wrap gap-2">
-                            {preferences.automation.restrictedApps.map(app => (
-                              <span key={app} className="text-[10px] px-2 py-0.5 bg-red-500/10 text-red-400 border border-red-500/20 rounded-md">
-                                {app}
-                              </span>
-                            ))}
-                            <button className="text-[10px] px-2 py-0.5 bg-white/5 text-white/40 rounded-md border border-white/10 hover:text-white transition-all">
-                              + ADD
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-
-                  {/* Frequency Slider */}
-                  <section>
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-[11px] uppercase tracking-[0.2em] text-[#8e8e93]">Screen Buffer Refresh</h3>
+                <section>
+                   <div className="flex items-center justify-between mb-4">
+                      <h3 className="text-[11px] uppercase tracking-[0.3em] text-zinc-400 font-bold">Screen Buffer Refresh Frequency</h3>
                       <span className="text-accent text-xs font-mono">{preferences.automation.screenScanningFrequency}s</span>
-                    </div>
-                    <input 
+                   </div>
+                   <input 
                       type="range" 
                       min="5" 
                       max="120" 
@@ -605,251 +1061,23 @@ export default function App() {
                         ...prev,
                         automation: { ...prev.automation, screenScanningFrequency: parseInt(e.target.value) }
                       }))}
-                      className="w-full h-1.5 bg-white/5 rounded-lg appearance-none cursor-pointer accent-accent"
-                    />
-                    <div className="flex justify-between mt-2 text-[9px] text-[#8e8e93] font-mono">
-                      <span>AGGRESSIVE (5s)</span>
-                      <span>POWER SAVING (120s)</span>
-                    </div>
-                  </section>
+                      className="w-full h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer accent-accent"
+                   />
+                </section>
+              </div>
 
-                  {/* Notification Status */}
-                  <section className="bg-white/[0.02] border border-white/5 p-6 rounded-3xl">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <h3 className="text-sm font-bold mb-1">Neural Alert System</h3>
-                        <p className="text-[10px] text-[#8e8e93]">Browser-level notifications for time-critical events.</p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span className={`px-2 py-0.5 rounded text-[8px] font-bold tracking-widest uppercase ${
-                          notificationStatus === 'granted' ? 'bg-green-500/20 text-green-400' :
-                          notificationStatus === 'denied' ? 'bg-red-500/20 text-red-400' :
-                          'bg-yellow-500/20 text-yellow-400'
-                        }`}>
-                          {notificationStatus}
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <button 
-                            onClick={() => {
-                              notifiedItems.current.clear();
-                              alert("Neural cache purged.");
-                            }}
-                            className="text-[10px] text-red-400 hover:underline font-bold"
-                          >
-                            PURGE CACHE
-                          </button>
-                          {notificationStatus !== 'granted' && (
-                            <button 
-                              onClick={requestNotificationPermission}
-                              className="text-[10px] text-accent hover:underline font-bold"
-                            >
-                              FIX PERMISSIONS
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </section>
-                </div>
-
-                <div className="p-8 bg-white/[0.02] border-t border-white/5 flex items-center justify-between">
-                  <div className="text-[10px] text-[#8e8e93] flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-                    PREFERENCES SYNCED TO LOCAL KERNEL
-                  </div>
-                  <button 
-                    onClick={() => setIsSettingsOpen(false)}
-                    className="px-8 py-3 bg-accent text-black font-bold text-xs rounded-full hover:scale-105 active:scale-95 transition-all"
-                  >
-                    DEPLOY CONFIGURATION
-                  </button>
-                </div>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        <aside className="bg-[#050505] p-6 border-r border-white/5 overflow-y-auto scrollbar-hide">
-          <h3 className="text-[11px] uppercase tracking-[0.15em] text-[#8e8e93] mb-5">Schedule</h3>
-          <div className="space-y-4">
-            {schedule.map((item) => (
-              <div key={item.id} className="group bg-white/[0.03] border border-white/5 p-4 rounded-xl relative overflow-hidden">
-                <div className="text-sm font-semibold">{item.title}</div>
-                <div className="text-[12px] text-[#8e8e93]">{new Date(item.startTime).toLocaleTimeString()}</div>
+              <div className="p-10 bg-white/[0.02] border-t border-white/10 flex justify-end">
                 <button 
-                  onClick={() => deleteScheduleItem(item.id)}
-                  className="absolute top-2 right-2 p-1 text-[#8e8e93] opacity-0 group-hover:opacity-100 transition-opacity hover:text-red-400"
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="px-10 py-4 bg-accent text-black font-bold text-xs rounded-3xl hover:scale-105 active:scale-95 transition-all uppercase tracking-[0.2em] shadow-[0_0_30px_rgba(0,242,255,0.2)]"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  Deploy Parameters
                 </button>
               </div>
-            ))}
-          </div>
-        </aside>
-
-        <main className="bg-[#050505] flex flex-col p-8 gap-6 overflow-hidden">
-          {/* Main View Header / Tabs */}
-          <div className="flex items-center justify-between">
-            <div className="flex bg-white/[0.03] border border-white/10 p-1 rounded-full">
-              <button 
-                onClick={() => setViewMode('sight')}
-                className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold tracking-widest transition-all ${viewMode === 'sight' ? 'bg-accent text-black' : 'text-[#8e8e93] hover:text-white'}`}
-              >
-                <Eye className="w-3 h-3" /> ACTIVE SIGHT
-              </button>
-              <button 
-                onClick={() => setViewMode('timeline')}
-                className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-bold tracking-widest transition-all ${viewMode === 'timeline' ? 'bg-accent text-black' : 'text-[#8e8e93] hover:text-white'}`}
-              >
-                <Activity className="w-3 h-3" /> NEURAL TIMELINE
-              </button>
-            </div>
-            
-            <div className="text-[10px] text-[#8e8e93] font-mono">
-              LATENCY: 24MS • BUFFER: 100%
-            </div>
-          </div>
-
-          <div className="flex-1 bg-[#111] rounded-[20px] border border-white/10 relative overflow-hidden">
-            <AnimatePresence mode="wait">
-              {viewMode === 'sight' ? (
-                <motion.div 
-                  key="sight"
-                  initial={{ opacity: 0, x: -20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: 20 }}
-                  className="w-full h-full"
-                >
-                  {isScreenActive ? (
-                    <video ref={videoRef} autoPlay className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center gap-4">
-                      <div className="w-20 h-20 bg-accent/5 rounded-full flex items-center justify-center border border-accent/20">
-                        <Monitor className="w-8 h-8 text-accent/40" />
-                      </div>
-                      <button onClick={startScreenShare} className="px-6 py-2 border border-accent/20 text-accent rounded-full text-xs font-bold tracking-widest hover:bg-accent/10 transition-all">
-                        ENABLE ACTIVE SIGHT
-                      </button>
-                    </div>
-                  )}
-                </motion.div>
-              ) : (
-                <motion.div 
-                  key="timeline"
-                  initial={{ opacity: 0, x: 20 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: -20 }}
-                  className="w-full h-full p-8 overflow-y-auto scrollbar-hide"
-                >
-                  <div className="flex items-start justify-between mb-8">
-                    <div className="text-4xl font-light tracking-tighter">Day Overview</div>
-                    <div className="text-right">
-                      <div className="text-xl font-bold text-accent">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</div>
-                      <div className="text-[10px] text-[#8e8e93] tracking-widest uppercase">Visualizing next 12 cycles</div>
-                    </div>
-                  </div>
-
-                  <div className="relative pl-16 space-y-12">
-                    <div className="absolute left-[31px] top-0 bottom-0 w-px bg-gradient-to-b from-accent/50 via-accent/10 to-transparent" />
-                    
-                    {/* Combine schedule and reminders for timeline */}
-                    {[
-                      ...schedule.map(s => ({ ...s, time: s.startTime, type: 'schedule' })),
-                      ...reminders.map(r => ({ ...r, title: r.text, type: 'reminder', time: Date.now().toString() })) // Fallback time if not set
-                    ]
-                    .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
-                    .map((item: any) => (
-                      <div key={item.id} className="relative group">
-                        <div className="absolute -left-[45px] top-1 text-[11px] font-mono text-[#8e8e93] bg-[#111] px-1 z-10 transition-colors group-hover:text-accent">
-                          {new Date(item.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </div>
-                        <div className={`absolute -left-[35px] top-2 w-2 h-2 rounded-full border border-accent bg-[#111] z-10 ${item.type === 'schedule' ? 'bg-accent' : 'border-dashed'}`} />
-                        
-                        <div className="bg-white/[0.03] border border-white/5 p-6 rounded-3xl hover:border-accent/30 transition-all hover:bg-white/[0.05]">
-                          <div className="flex items-start justify-between mb-2">
-                             <div className="font-bold text-lg tracking-tight">{item.title}</div>
-                             <div className={`text-[10px] px-2 py-0.5 rounded-sm font-bold tracking-widest ${item.type === 'schedule' ? 'bg-accent/20 text-accent' : 'bg-white/10 text-[#8e8e93]'}`}>
-                               {item.type.toUpperCase()}
-                             </div>
-                          </div>
-                          <div className="text-sm text-[#8e8e93] leading-relaxed">
-                            {item.type === 'schedule' 
-                              ? `Duration: ${Math.round((new Date((item as any).endTime).getTime() - new Date((item as any).startTime).getTime()) / 60000)} minutes`
-                              : `Priority: ${item.priority || 'standard'}`}
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-
-                    {schedule.length === 0 && reminders.length === 0 && (
-                      <div className="text-center py-20 opacity-20 select-none">
-                        <Activity className="w-16 h-16 mx-auto mb-4" />
-                        <div className="text-xl font-light">NO DATA IN CHRONO-BUFFER</div>
-                      </div>
-                    )}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-
-          <div className="h-40 bg-black/30 border border-white/5 rounded-xl p-5 overflow-y-auto">
-             <div className="font-mono text-[12px] text-[#00ff66] space-y-1">
-              {messages.length === 0 ? (
-                <div>{">"} INITIALIZING...</div>
-              ) : (
-                messages.filter(m => m.role === 'assistant').slice(-3).map(m => (
-                  <div key={m.id}>{">"} {m.content.substring(0, 100)}...</div>
-                ))
-              )}
-            </div>
-          </div>
-        </main>
-
-        <aside className="bg-[#050505] p-6 border-l border-white/5 overflow-y-auto flex flex-col">
-          <h3 className="text-[11px] uppercase tracking-[0.15em] text-[#8e8e93] mb-5">Tasks</h3>
-          <div className="space-y-3">
-            {reminders.map((reminder) => (
-              <div key={reminder.id} className="p-4 rounded-xl border border-white/10 bg-white/[0.03]">
-                <div className="text-sm font-semibold">{reminder.text}</div>
-                <button onClick={() => deleteReminder(reminder.id)} className="text-xs text-[#8e8e93] hover:text-red-400 mt-2">DELETE</button>
-              </div>
-            ))}
-          </div>
-        </aside>
-
-        <footer className="col-start-1 col-end-4 border-t border-white/10 px-10 flex items-center bg-[#050505]/95 z-20">
-          <div className="w-full h-14 bg-white/[0.03] border border-white/10 rounded-full flex items-center px-6 gap-2">
-             <button 
-              onClick={() => setPreferences(prev => ({ ...prev, voiceEnabled: !prev.voiceEnabled }))}
-              className={`p-2 rounded-full transition-all ${preferences.voiceEnabled ? 'bg-accent/20 text-accent' : 'text-gray-600'}`}
-              title="Toggle Hindi Voice Response"
-            >
-              {preferences.voiceEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
-            </button>
-            <button 
-              onClick={toggleListening}
-              className={`p-2 rounded-full transition-all ${isListening ? 'bg-red-500/20 text-red-500 animate-pulse' : 'text-gray-600 hover:text-white'}`}
-              title="Voice Command"
-            >
-              {isListening ? <Mic className="w-5 h-5" /> : <MicOff className="w-5 h-5" />}
-            </button>
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              placeholder="Ask Aura..."
-              className="flex-1 bg-transparent border-none focus:ring-0 text-[15px] resize-none h-10 text-white"
-            />
-             <div ref={chatEndRef} />
-             {isScreenActive && (
-              <button onClick={stopScreenShare} className="text-red-500/50">
-                <MonitorOff className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        </footer>
-      </div>
-    </div>
-  );
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    );
+  }
 }

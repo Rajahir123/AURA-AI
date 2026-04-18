@@ -107,19 +107,19 @@ export const addScheduleItemTool: FunctionDeclaration = {
   },
 };
 
-export async function getAuraVoice(text: string) {
+export async function getAuraVoice(text: string, voiceName: string = 'Kore') {
   try {
     const ai = getGemini();
     if (!ai) throw new Error("Aura AI Assistant: Gemini API key is not configured for Voice.");
 
     const response = await ai.models.generateContent({
       model: "gemini-3.1-flash-tts-preview",
-      contents: [{ parts: [{ text: `Speak this in a warm, helpful Hindi voice: ${text}` }] }],
+      contents: [{ parts: [{ text: `Speak this in a warm, helpful voice: ${text}` }] }],
       config: {
         responseModalities: [Modality.AUDIO],
         speechConfig: {
           voiceConfig: {
-            prebuiltVoiceConfig: { voiceName: 'Kore' },
+            prebuiltVoiceConfig: { voiceName },
           },
         },
       },
